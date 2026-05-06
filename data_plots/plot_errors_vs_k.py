@@ -12,6 +12,8 @@ import numpy as np
 from load_data import (
     CANONICAL_ERRORS,
     DATASETS,
+    DATASET_TITLES,
+    MEMORY_DISPLAY,
     MEMORY_SYSTEMS,
     group_by_k,
     load_analysis,
@@ -20,13 +22,6 @@ from load_data import (
 
 OUT_DIR = Path(__file__).parent / "figures" / "error_breakdown"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-DATASET_TITLES = {
-    "coexisting": "Coexisting facts",
-    "conditional": "Conditional",
-    "conditional_hard": "Conditional (hard)",
-    "persona_retrieval": "Persona retrieval",
-}
 
 ERROR_COLORS = {
     "storage": "#ff7f0e",
@@ -47,18 +42,16 @@ def error_breakdown(records):
 
 
 def plot_dataset(dataset: str):
-    fig, ax = plt.subplots(figsize=(10, 5.5))
+    fig, ax = plt.subplots(figsize=(16, 6.5))
 
-    bar_labels = []
     bar_data = {et: [] for et in CANONICAL_ERRORS}
-    bar_totals = []
-    group_starts = []  # x positions where each memory-system group begins
 
     x = 0
     xticks = []
     xtick_labels = []
-    sep = 0.6  # gap between memory-system groups
-    width = 0.8
+    step = 1.5     # spacing between adjacent k bars within a group
+    sep = 1.0      # extra gap between memory-system groups
+    width = 1.0
 
     for mem in MEMORY_SYSTEMS:
         recs = load_analysis(dataset, mem)
@@ -68,16 +61,13 @@ def plot_dataset(dataset: str):
         ks = sorted(grouped.keys())
         if not ks:
             continue
-        group_starts.append((mem, x))
         for k in ks:
-            fracs, total = error_breakdown(grouped[k])
+            fracs, _ = error_breakdown(grouped[k])
             for et in CANONICAL_ERRORS:
                 bar_data[et].append(fracs[et])
-            bar_totals.append(total)
-            bar_labels.append(f"k={k}")
             xticks.append(x)
             xtick_labels.append(f"k={k}")
-            x += 1
+            x += step
         x += sep  # gap before next memory system
 
     if not xticks:
@@ -90,10 +80,6 @@ def plot_dataset(dataset: str):
         vals = np.array(bar_data[et])
         ax.bar(xs, vals, width=width, bottom=bottoms, label=et, color=ERROR_COLORS[et])
         bottoms += vals
-
-    # Annotate total errored count above each bar
-    for xi, total in zip(xs, bar_totals):
-        ax.text(xi, 1.02, f"n={total}", ha="center", va="bottom", fontsize=7, color="#444")
 
     # Memory-system group labels under x ticks
     ymin = -0.07
@@ -108,20 +94,20 @@ def plot_dataset(dataset: str):
         span_xs = xticks[cursor:cursor + len(ks)]
         cursor += len(ks)
         center = (span_xs[0] + span_xs[-1]) / 2
-        ax.text(center, ymin, mem, ha="center", va="top", fontsize=10, fontweight="bold",
+        ax.text(center, ymin, MEMORY_DISPLAY[mem], ha="center", va="top", fontsize=13, fontweight="bold",
                 transform=ax.get_xaxis_transform())
 
     ax.set_xticks(xticks)
-    ax.set_xticklabels(xtick_labels, fontsize=8)
+    ax.set_xticklabels(xtick_labels)
     ax.set_ylim(0, 1.10)
-    ax.set_ylabel("fraction of errored questions")
+    ax.set_ylabel("Fraction of Errored Questions")
     ax.set_title(f"Error breakdown vs. k — {DATASET_TITLES[dataset]}")
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, -0.22), fontsize=9, ncol=4, frameon=False)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, -0.22), ncol=4, frameon=False)
     ax.grid(True, axis="y", alpha=0.3)
 
-    fig.tight_layout(rect=[0, 0.05, 1, 1])
-    out = OUT_DIR / f"{dataset}.png"
-    fig.savefig(out, dpi=150)
+    fig.tight_layout(pad=0.4, rect=[0, 0.05, 1, 1])
+    out = OUT_DIR / f"{dataset}.pdf"
+    fig.savefig(out)
     print(f"wrote {out}")
     plt.close(fig)
     return out

@@ -7,11 +7,9 @@ Output layout under data_plots/figures/:
     summary_tokens.md
   success_vs_k/<model>/<dataset>.png
   perf_vs_model/<memory>.png
-  errors_vs_k/<model>/<dataset>.png
 """
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
@@ -21,33 +19,21 @@ import numpy as np
 
 from load_data import (
     DATASETS,
+    DATASET_TITLES,
+    MEMORY_COLORS,
+    MEMORY_DISPLAY,
     MEMORY_SYSTEMS,
+    MODEL_COLORS,
+    REPORT_MODELS,
+    X_AXIS_LABEL,
     is_correct,
     load_analysis,
+    style_k_axis,
+    success_rate_with_ci,
 )
 
 FIG_DIR = Path(__file__).parent / "figures"
 
-DATASET_TITLES = {
-    "coexisting": "Coexisting facts",
-    "conditional": "Conditional",
-    "conditional_hard": "Conditional (hard)",
-    "persona_retrieval": "Persona retrieval",
-}
-
-MEMORY_COLORS = {
-    "mem0": "#1f77b4",
-    "simplemem": "#2ca02c",
-    "amem": "#d62728",
-}
-
-MODEL_COLORS = {
-    "gpt-4.1-mini": "#1f77b4",
-    "haiku-4.5": "#d62728",
-}
-
-# Models we report on across all tables/plots.
-REPORT_MODELS = ["gpt-4.1-mini", "haiku-4.5"]
 REPORT_KS = [5, 10, 15]
 
 
@@ -57,20 +43,6 @@ def success_rate(records) -> Optional[float]:
     if not records:
         return None
     return sum(1 for r in records if is_correct(r)) / len(records)
-
-
-def error_rate_with_se(records) -> Optional[tuple]:
-    """Return (error_rate, standard_error) using the binomial-proportion SE.
-
-    Standard error = sqrt(p*(1-p)/n) on the error proportion p = 1 - success.
-    """
-    if not records:
-        return None
-    n = len(records)
-    correct = sum(1 for r in records if is_correct(r))
-    p_err = 1.0 - correct / n
-    se = math.sqrt(p_err * (1.0 - p_err) / n) if n > 0 else 0.0
-    return p_err, se
 
 
 def avg_tokens(records) -> Optional[float]:
@@ -148,7 +120,7 @@ def _build_table(metric: str) -> str:
                     s = f"**{s}**"
                 cell_strs.append(s)
             lines.append(
-                f"| {label_dataset} | {memory} | " + " | ".join(cell_strs) + " |"
+                f"| {label_dataset} | {MEMORY_DISPLAY[memory]} | " + " | ".join(cell_strs) + " |"
             )
     return "\n".join(lines) + "\n"
 
@@ -174,34 +146,49 @@ def write_tables() -> None:
 
 def plot_success_vs_k_per_model() -> None:
     base = FIG_DIR / "success_vs_k"
+    base.mkdir(parents=True, exist_ok=True)
+    n_ds = len(DATASETS)
     for model in REPORT_MODELS:
-        out_dir = base / model
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for dataset in DATASETS:
-            fig, ax = plt.subplots(figsize=(6.2, 4.4))
-            any_data = False
+        fig, axes = plt.subplots(1, n_ds, figsize=(3.6 * n_ds, 3.6), sharey=True)
+        axes = np.atleast_1d(axes).flatten()
+        any_curve = False
+        for i, (ax, dataset) in enumerate(zip(axes, DATASETS)):
+            ds_any = False
             for memory in MEMORY_SYSTEMS:
                 grouped = collect_records(dataset, memory, model)
                 ks = sorted(grouped.keys())
                 if not ks:
                     continue
-                ys = [success_rate(grouped[k]) for k in ks]
-                ax.plot(ks, ys, marker="o", label=memory, color=MEMORY_COLORS[memory])
-                any_data = True
-            if not any_data:
-                plt.close(fig)
-                continue
-            ax.set_xlabel("k (num memories retrieved)")
-            ax.set_ylabel("success rate")
+                ys, lo, hi = [], [], []
+                for k in ks:
+                    res = success_rate_with_ci(grouped[k])
+                    p, l, h = (None, 0.0, 0.0) if res is None else res
+                    ys.append(p)
+                    lo.append(l)
+                    hi.append(h)
+                ax.errorbar(
+                    ks, ys, yerr=[lo, hi],
+                    marker="o", capsize=3, label=MEMORY_DISPLAY[memory],
+                    color=MEMORY_COLORS[memory],
+                )
+                ds_any = True
+                any_curve = True
+            ax.set_title(DATASET_TITLES[dataset])
+            ax.set_xlabel(X_AXIS_LABEL)
+            if i == 0:
+                ax.set_ylabel("Success Rate")
             ax.set_ylim(0, 1)
-            ax.set_title(f"{DATASET_TITLES[dataset]} — {model}")
+            style_k_axis(ax)
             ax.grid(True, alpha=0.3)
-            ax.legend()
-            fig.tight_layout()
-            out = out_dir / f"{dataset}.png"
-            fig.savefig(out, dpi=150)
+            if ds_any:
+                ax.legend()
+        fig.suptitle(f"Success rate vs. k — {model}")
+        fig.tight_layout(pad=0.4, w_pad=0.3, rect=[0, 0, 1, 0.94])
+        out = base / f"{model}.pdf"
+        if any_curve:
+            fig.savefig(out, bbox_inches="tight", pad_inches=0.05)
             print(f"wrote {out}")
-            plt.close(fig)
+        plt.close(fig)
 
 
 # ----------------------- performance vs test-taker model ----------------------
@@ -210,87 +197,49 @@ def plot_perf_vs_model() -> None:
     out_dir = FIG_DIR / "perf_vs_model"
     out_dir.mkdir(parents=True, exist_ok=True)
     n_ds = len(DATASETS)
-    n_cols = 2
-    n_rows = math.ceil(n_ds / n_cols)
     for memory in MEMORY_SYSTEMS:
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(11, 4.0 * n_rows), sharey=True)
-        axes = np.array(axes).flatten()
+        fig, axes = plt.subplots(1, n_ds, figsize=(3.6 * n_ds, 3.6), sharey=True)
+        axes = np.atleast_1d(axes).flatten()
         any_curve = False
-        for ax, dataset in zip(axes, DATASETS):
+        for i, (ax, dataset) in enumerate(zip(axes, DATASETS)):
             ds_any = False
             for model in REPORT_MODELS:
                 grouped = collect_records(dataset, memory, model)
                 ks = sorted(grouped.keys())
                 if not ks:
                     continue
-                ys = [success_rate(grouped[k]) for k in ks]
-                ax.plot(ks, ys, marker="o", label=model, color=MODEL_COLORS.get(model))
+                ys, lo, hi = [], [], []
+                for k in ks:
+                    res = success_rate_with_ci(grouped[k])
+                    p, l, h = (None, 0.0, 0.0) if res is None else res
+                    ys.append(p)
+                    lo.append(l)
+                    hi.append(h)
+                ax.errorbar(
+                    ks, ys, yerr=[lo, hi],
+                    marker="o", capsize=3, label=model,
+                    color=MODEL_COLORS.get(model),
+                )
                 ds_any = True
                 any_curve = True
             ax.set_title(DATASET_TITLES[dataset])
-            ax.set_xlabel("k")
-            ax.set_ylabel("success rate")
+            ax.set_xlabel(X_AXIS_LABEL)
+            if i == 0:
+                ax.set_ylabel("Success Rate")
             ax.set_ylim(0, 1)
+            style_k_axis(ax)
             ax.grid(True, alpha=0.3)
             if ds_any:
-                ax.legend(fontsize=8)
+                ax.legend()
         for ax in axes[n_ds:]:
             ax.axis("off")
-        fig.suptitle(f"Success vs. k by test-taker model — {memory}", fontsize=13)
-        fig.tight_layout(rect=[0, 0, 1, 0.96])
-        out = out_dir / f"{memory}.png"
+        fig.suptitle(f"Success vs. k by test-taker model — {MEMORY_DISPLAY[memory]}")
+        fig.tight_layout(pad=0.4, w_pad=0.3, rect=[0, 0, 1, 0.94])
+        out = out_dir / f"{memory}.pdf"
         if any_curve:
-            fig.savefig(out, dpi=150)
+            fig.savefig(out, bbox_inches="tight", pad_inches=0.05)
             print(f"wrote {out}")
         plt.close(fig)
-
-
-# ------------------------ fraction-of-errors per dataset ----------------------
-
-def plot_errors_vs_k_per_model() -> None:
-    base = FIG_DIR / "errors_vs_k"
-    for model in REPORT_MODELS:
-        out_dir = base / model
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for dataset in DATASETS:
-            fig, ax = plt.subplots(figsize=(6.2, 4.4))
-            any_data = False
-            for memory in MEMORY_SYSTEMS:
-                grouped = collect_records(dataset, memory, model)
-                ks = sorted(grouped.keys())
-                if not ks:
-                    continue
-                xs, ys, errs = [], [], []
-                for k in ks:
-                    res = error_rate_with_se(grouped[k])
-                    if res is None:
-                        continue
-                    p, se = res
-                    xs.append(k)
-                    ys.append(p)
-                    errs.append(se)
-                if not xs:
-                    continue
-                ax.errorbar(
-                    xs, ys, yerr=errs,
-                    marker="o", capsize=3, label=memory,
-                    color=MEMORY_COLORS[memory],
-                )
-                any_data = True
-            if not any_data:
-                plt.close(fig)
-                continue
-            ax.set_xlabel("k (num memories retrieved)")
-            ax.set_ylabel("fraction of errored questions")
-            ax.set_ylim(0, 1)
-            ax.set_title(f"{DATASET_TITLES[dataset]} — {model}")
-            ax.grid(True, alpha=0.3)
-            ax.legend()
-            fig.tight_layout()
-            out = out_dir / f"{dataset}.png"
-            fig.savefig(out, dpi=150)
-            print(f"wrote {out}")
-            plt.close(fig)
 
 
 # ------------------------------------ main ------------------------------------
@@ -300,7 +249,6 @@ def main() -> None:
     write_tables()
     plot_success_vs_k_per_model()
     plot_perf_vs_model()
-    plot_errors_vs_k_per_model()
 
 
 if __name__ == "__main__":

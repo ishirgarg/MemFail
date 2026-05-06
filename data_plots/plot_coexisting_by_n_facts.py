@@ -10,11 +10,14 @@ import numpy as np
 
 from load_data import (
     CANONICAL_ERRORS,
+    MEMORY_COLORS,
+    MEMORY_DISPLAY,
     MEMORY_SYSTEMS,
     is_correct,
     load_analysis,
     n_preferences,
     normalized_error,
+    success_rate_with_ci,
 )
 
 OUT_DIR = Path(__file__).parent / "figures" / "coexisting_by_nfacts"
@@ -55,7 +58,7 @@ def plot_for_memory(memory: str):
     ks = sorted(by_k_n.keys())
     all_ns = sorted({n for d in by_k_n.values() for n in d.keys()})
 
-    fig, axes = plt.subplots(1, len(ks), figsize=(3.5 * len(ks), 5), sharey=True)
+    fig, axes = plt.subplots(1, len(ks), figsize=(2.8 * len(ks), 3.6), sharey=True)
     if len(ks) == 1:
         axes = [axes]
 
@@ -78,7 +81,7 @@ def plot_for_memory(memory: str):
             n_all = len(recs)
             n_err = sum(1 for r in recs if not is_correct(r))
             if n_all:
-                ax.text(n, 1.02, f"{n_err}/{n_all}", ha="center", va="bottom", fontsize=7, color="#444")
+                ax.text(n, 1.02, f"{n_err}/{n_all}", ha="center", va="bottom", fontsize=10, color="#444")
 
         ax.set_title(f"k={k}")
         ax.set_xlabel("# coexisting facts")
@@ -86,19 +89,19 @@ def plot_for_memory(memory: str):
         ax.set_ylim(0, 1.10)
         ax.grid(True, axis="y", alpha=0.3)
 
-    axes[0].set_ylabel("fraction of errored questions")
-    fig.suptitle(f"Coexisting facts — error breakdown by # facts and k ({memory})", fontsize=13)
+    axes[0].set_ylabel("Fraction of Errored Questions")
+    fig.suptitle(f"Coexisting-Facts — error breakdown by # facts and k ({MEMORY_DISPLAY[memory]})")
 
     handles, labels = [], []
     for et in CANONICAL_ERRORS:
         handles.append(plt.Rectangle((0, 0), 1, 1, color=ERROR_COLORS[et]))
         labels.append(et)
-    fig.legend(handles, labels, loc="upper right", ncol=4, fontsize=9,
+    fig.legend(handles, labels, loc="upper right", ncol=4,
                bbox_to_anchor=(0.99, 0.97))
 
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
-    out = OUT_DIR / f"errors_{memory}.png"
-    fig.savefig(out, dpi=150)
+    fig.tight_layout(pad=0.4, w_pad=0.3, rect=[0, 0, 1, 0.92])
+    out = OUT_DIR / f"errors_{memory}.pdf"
+    fig.savefig(out)
     print(f"wrote {out}")
     plt.close(fig)
     return out
@@ -112,32 +115,40 @@ def plot_success_by_n_facts():
         return None
 
     ks = sorted({k for v in per_mem.values() for k in v.keys()})
-    fig, axes = plt.subplots(1, len(ks), figsize=(3.6 * len(ks), 4.5), sharey=True)
+    fig, axes = plt.subplots(1, len(ks), figsize=(2.8 * len(ks), 3.4), sharey=True)
     if len(ks) == 1:
         axes = [axes]
 
-    color = {"mem0": "#1f77b4", "simplemem": "#2ca02c", "amem": "#d62728"}
     for ax, k in zip(axes, ks):
-        for mem, by_k_n in per_mem.items():
-            if k not in by_k_n:
+        for mem in MEMORY_SYSTEMS:
+            by_k_n = per_mem.get(mem)
+            if not by_k_n or k not in by_k_n:
                 continue
             ns = sorted(by_k_n[k].keys())
-            ys = []
+            ys, lo, hi = [], [], []
             for n in ns:
                 recs = by_k_n[k][n]
-                ys.append(sum(1 for r in recs if is_correct(r)) / len(recs) if recs else None)
-            ax.plot(ns, ys, marker="o", label=mem, color=color.get(mem))
+                res = success_rate_with_ci(recs)
+                p, l, h = (None, 0.0, 0.0) if res is None else res
+                ys.append(p)
+                lo.append(l)
+                hi.append(h)
+            ax.errorbar(
+                ns, ys, yerr=[lo, hi],
+                marker="o", capsize=3,
+                label=MEMORY_DISPLAY[mem], color=MEMORY_COLORS[mem],
+            )
         ax.set_title(f"k={k}")
         ax.set_xlabel("# coexisting facts")
         ax.set_ylim(0, 1)
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=8)
+        ax.legend()
 
-    axes[0].set_ylabel("success rate")
-    fig.suptitle("Coexisting facts — success rate vs. # coexisting facts", fontsize=13)
-    fig.tight_layout(rect=[0, 0, 1, 0.93])
-    out = OUT_DIR / "success.png"
-    fig.savefig(out, dpi=150)
+    axes[0].set_ylabel("Success Rate")
+    fig.suptitle("Coexisting-Facts — success rate vs. # coexisting facts")
+    fig.tight_layout(pad=0.4, w_pad=0.3, rect=[0, 0, 1, 0.92])
+    out = OUT_DIR / "success.pdf"
+    fig.savefig(out)
     print(f"wrote {out}")
     plt.close(fig)
     return out

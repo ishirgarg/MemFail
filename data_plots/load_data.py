@@ -3,10 +3,35 @@ from __future__ import annotations
 
 import glob
 import json
+import math
 import os
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+import matplotlib as _mpl
+from matplotlib.ticker import MultipleLocator, NullLocator
+
+# Global matplotlib style — applied at import so every plotting module inherits
+# the same axis/legend/label sizes.
+_mpl.rcParams.update({
+    "font.size": 13,
+    "axes.titlesize": 15,
+    "axes.labelsize": 14,
+    "xtick.labelsize": 12,
+    "ytick.labelsize": 12,
+    "legend.fontsize": 12,
+    "figure.titlesize": 17,
+})
+
+
+def style_k_axis(ax) -> None:
+    """Force integer-only x-axis ticks at multiples of 4 (0, 4, 8, ...)."""
+    ax.xaxis.set_major_locator(MultipleLocator(4))
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.ticklabel_format(axis="x", style="plain", useOffset=False)
+
+X_AXIS_LABEL = "k"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PLAYGROUND = PROJECT_ROOT / "playground"
@@ -16,15 +41,42 @@ DATASETS = {
     "conditional": PLAYGROUND / "conditional_facts" / "results",
     "conditional_hard": PLAYGROUND / "conditional_facts" / "results",
     "persona_retrieval": PLAYGROUND / "custom_persona_retrieval" / "results",
+    "long_hop": PLAYGROUND / "long_hop" / "results",
 }
 
-MEMORY_SYSTEMS = ["mem0", "simplemem", "amem"]
+# Canonical memory-system order (used as legend order everywhere).
+MEMORY_SYSTEMS = ["mem0", "simplemem", "amem", "structmem"]
+
+MEMORY_DISPLAY = {
+    "mem0": "Mem0",
+    "simplemem": "SimpleMem",
+    "amem": "A-MEM",
+    "structmem": "StructMem",
+}
+
+MEMORY_COLORS = {
+    "mem0": "#1f77b4",
+    "simplemem": "#2ca02c",
+    "amem": "#d62728",
+    "structmem": "#9467bd",
+}
 
 # Per-memory-system metadata field that holds the internal LLM model.
 MEMORY_MODEL_FIELD = {
     "mem0": "mem0_llm_model",
     "amem": "amem_llm_model",
     "simplemem": "simplemem_model",
+    "structmem": "structmem_model",
+}
+
+# Canonical test-taker model order (used as legend order everywhere).
+REPORT_MODELS = ["gpt-4.1-mini", "haiku-4.5", "gpt-5.4-mini", "gemini-3.1"]
+
+MODEL_COLORS = {
+    "gpt-4.1-mini": "#1f77b4",
+    "haiku-4.5": "#d62728",
+    "gpt-5.4-mini": "#2ca02c",
+    "gemini-3.1": "#ff7f0e",
 }
 
 # Normalize raw model strings to short display names used everywhere.
@@ -33,7 +85,18 @@ MODEL_DISPLAY = {
     "vertex_ai/claude-haiku-4-5": "haiku-4.5",
     "claude-haiku-4-5": "haiku-4.5",
     "gpt-5.4-mini": "gpt-5.4-mini",
+    "gpt-5-mini": "gpt-5.4-mini",
     "gpt-4o-mini": "gpt-4o-mini",
+    "gemini/gemini-3.1-pro-preview": "gemini-3.1",
+    "gemini-3.1-pro-preview": "gemini-3.1",
+}
+
+DATASET_TITLES = {
+    "coexisting": "Coexisting-Facts",
+    "conditional": "Conditional-Facts",
+    "conditional_hard": "Conditional-Facts (Hard)",
+    "persona_retrieval": "Persona-Retrieval",
+    "long_hop": "Long-Hop",
 }
 
 
@@ -64,7 +127,10 @@ ERROR_NORMALIZE = {
 
 
 def _is_hard_run(run_dir: str) -> bool:
-    return "run_hard_" in os.path.basename(run_dir)
+    name = os.path.basename(run_dir)
+    # New naming carries HARD as a task token: `run_<task>_HARD__...`.
+    # Old naming used a `run_hard_` prefix; keep that as a fallback.
+    return "_HARD__" in name or name.startswith("run_hard_")
 
 
 def _list_runs(dataset: str) -> List[str]:
@@ -132,6 +198,46 @@ def available_models(dataset: str, memory: str) -> List[str]:
     return sorted({r["_model"] for r in load_analysis(dataset, memory) if r.get("_model")})
 
 
+def mean_memory_tokens_per_memory(
+    dataset: str,
+    memory: str,
+    k: int,
+    model: Optional[str] = None,
+) -> Optional[float]:
+    """Mean (memory_tokens / k) over graded turns across all runs matching the
+    given dataset/memory/k(/model) filter. Returns None if no graded turns are
+    found."""
+    total = 0.0
+    n = 0
+    for run_dir in _list_runs(dataset):
+        sub = Path(run_dir) / memory
+        if not sub.is_dir():
+            continue
+        gt_files = sorted(sub.glob("graded_traces_*.json"))
+        if not gt_files:
+            continue
+        with open(gt_files[-1], "r", encoding="utf-8") as f:
+            meta = json.load(f).get("run_metadata", {})
+        run_k = meta.get("num_memories")
+        if run_k != k:
+            continue
+        if model is not None and memory_model(meta, memory) != model:
+            continue
+        traces_files = sorted(sub.glob("traces_*.json"))
+        if not traces_files:
+            continue
+        with open(traces_files[-1], "r", encoding="utf-8") as f:
+            traces_blob = json.load(f)
+        for res in traces_blob.get("evaluation_summary", {}).get("results", []):
+            for t in res.get("traces", []):
+                if t.get("should_grade"):
+                    total += t.get("memory_tokens", 0)
+                    n += 1
+    if n == 0:
+        return None
+    return (total / n) / k
+
+
 def all_records(dataset: str) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for mem in MEMORY_SYSTEMS:
@@ -142,6 +248,28 @@ def all_records(dataset: str) -> List[Dict[str, Any]]:
 def is_correct(record: Dict[str, Any]) -> bool:
     """Treat judge_result == 'correct' as success."""
     return record.get("judge_result") == "correct"
+
+
+def success_rate_with_ci(records, z: float = 1.96) -> Optional[Tuple[float, float, float]]:
+    """Binomial success rate with Wilson 95% CI.
+
+    Returns (p, lower_err, upper_err) where lower_err = p - lower_bound and
+    upper_err = upper_bound - p (i.e. the offsets to use for matplotlib's
+    asymmetric yerr). Wilson keeps a non-zero interval at p=0 and p=1, where
+    the Wald formula sqrt(p(1-p)/n) collapses. Returns None for empty input.
+    """
+    if not records:
+        return None
+    n = len(records)
+    correct = sum(1 for r in records if is_correct(r))
+    p = correct / n
+    denom = 1.0 + z * z / n
+    center = (p + z * z / (2 * n)) / denom
+    half = (z / denom) * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    lower = max(0.0, center - half)
+    upper = min(1.0, center + half)
+    # max(0, ...) guards against numerical jitter where lower > p or upper < p.
+    return p, max(0.0, p - lower), max(0.0, upper - p)
 
 
 def normalized_error(record: Dict[str, Any]) -> Optional[str]:

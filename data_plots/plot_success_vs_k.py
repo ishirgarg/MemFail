@@ -7,60 +7,60 @@ import matplotlib.pyplot as plt
 
 from load_data import (
     DATASETS,
+    DATASET_TITLES,
+    MEMORY_COLORS,
+    MEMORY_DISPLAY,
     MEMORY_SYSTEMS,
+    X_AXIS_LABEL,
     group_by_k,
-    is_correct,
     load_analysis,
+    style_k_axis,
+    success_rate_with_ci,
 )
 
 OUT_DIR = Path(__file__).parent / "figures" / "success_vs_k"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-DATASET_TITLES = {
-    "coexisting": "Coexisting facts",
-    "conditional": "Conditional",
-    "conditional_hard": "Conditional (hard)",
-    "persona_retrieval": "Persona retrieval",
-}
-
-COLORS = {
-    "mem0": "#1f77b4",
-    "simplemem": "#2ca02c",
-    "amem": "#d62728",
-}
-
-
-def success_rate(records):
-    if not records:
-        return None
-    return sum(1 for r in records if is_correct(r)) / len(records)
-
 
 def main():
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8), sharey=True)
-    axes = axes.flatten()
+    n_ds = len(DATASETS)
+    fig, axes = plt.subplots(1, n_ds, figsize=(3.6 * n_ds, 3.6), sharey=True)
+    if n_ds == 1:
+        axes = [axes]
 
-    for ax, dataset in zip(axes, DATASETS):
+    for i, (ax, dataset) in enumerate(zip(axes, DATASETS)):
         for mem in MEMORY_SYSTEMS:
             recs = load_analysis(dataset, mem)
             if not recs:
                 continue
             grouped = group_by_k(recs)
             ks = sorted(grouped.keys())
-            ys = [success_rate(grouped[k]) for k in ks]
-            ax.plot(ks, ys, marker="o", label=mem, color=COLORS.get(mem))
+            ys, lo, hi = [], [], []
+            for k in ks:
+                res = success_rate_with_ci(grouped[k])
+                p, l, h = (None, 0.0, 0.0) if res is None else res
+                ys.append(p)
+                lo.append(l)
+                hi.append(h)
+            ax.errorbar(
+                ks, ys, yerr=[lo, hi],
+                marker="o", capsize=3,
+                label=MEMORY_DISPLAY[mem], color=MEMORY_COLORS[mem],
+            )
 
         ax.set_title(DATASET_TITLES[dataset])
-        ax.set_xlabel("k (num memories retrieved)")
-        ax.set_ylabel("success rate")
+        ax.set_xlabel(X_AXIS_LABEL)
+        if i == 0:
+            ax.set_ylabel("Success Rate")
         ax.set_ylim(0, 1)
+        style_k_axis(ax)
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=8)
+        ax.legend()
 
-    fig.suptitle("Success rate vs. k", fontsize=14)
-    fig.tight_layout()
-    out = OUT_DIR / "overview.png"
-    fig.savefig(out, dpi=150)
+    fig.suptitle("Success rate vs. k")
+    fig.tight_layout(pad=0.4, w_pad=0.3, rect=[0, 0, 1, 0.94])
+    out = OUT_DIR / "overview.pdf"
+    fig.savefig(out, bbox_inches="tight", pad_inches=0.05)
     print(f"wrote {out}")
 
 

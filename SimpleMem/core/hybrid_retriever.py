@@ -84,7 +84,7 @@ class HybridRetriever:
         
         # Step 1: Intelligent analysis of what information is needed
         information_plan = self._analyze_information_requirements(query)
-        print(f"[Planning] Identified {len(information_plan['required_info'])} information requirements")
+        print(f"[Planning] Identified {len(information_plan.get('required_info', []))} information requirements")
         
         # Step 2: Generate minimal necessary queries based on the plan
         search_queries = self._generate_targeted_queries(query, information_plan)
