@@ -427,7 +427,7 @@ def main() -> None:
     parser.add_argument(
         "--output-csv",
         type=str,
-        default=str(PROJECT_ROOT / "datasets" / "custom_persona_retrieval" / "misleading_persona_dataset.csv"),
+        default=str(PROJECT_ROOT / "datasets" / "custom_persona_retrieval" / "persona_dataset.csv"),
         help="Path to output CSV.",
     )
     parser.add_argument("--num-rows", type=int, default=100, help="Number of datapoints to generate.")
