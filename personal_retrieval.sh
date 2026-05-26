@@ -87,7 +87,7 @@ SKIP_LICOMEMORY=true
 SKIP_ANALYSIS=false
 
 # Dataset
-DATASET="datasets/custom_persona_retrieval/misleading_persona_dataset.csv"
+DATASET="datasets/custom_persona_retrieval/persona_dataset.csv"
 NUM_ROWS=100
 SEED=42
 
