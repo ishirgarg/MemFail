@@ -3,7 +3,7 @@
 <div align="center">
 
 [🤗 Dataset](https://huggingface.co/datasets/ishirgarg/MemFail) ·
-[📄 Paper](TODO)
+[📄 Paper](https://arxiv.org/abs/2605.26667)
 
 </div>
 
@@ -119,5 +119,11 @@ For questions or suggestions, please open an issue on GitHub.
 If you use MemFail in your research, please cite:
 
 ```bibtex
-TODO
+@article{garg2026memfail,
+  title={MemFail: Stress-Testing Failure Modes of LLM Memory Systems},
+  author={Garg, Ishir},
+  journal={arXiv preprint arXiv:2605.26667},
+  year={2026},
+  url={https://arxiv.org/abs/2605.26667}
+}
 ```
