@@ -121,7 +121,7 @@ If you use MemFail in your research, please cite:
 ```bibtex
 @article{garg2026memfail,
   title={MemFail: Stress-Testing Failure Modes of LLM Memory Systems},
-  author={Garg, Ishir},
+  author={Garg, Ishir and Kolhe, Neel and Song, Dawn and Zhao, Xuandong},
   journal={arXiv preprint arXiv:2605.26667},
   year={2026},
   url={https://arxiv.org/abs/2605.26667}
